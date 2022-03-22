@@ -1,0 +1,18 @@
+Column Name,Description
+id,Unique identifier for each wood block
+station,The decomposition station location of the block during decay
+year,"The length of time decay occurred, one or two years"
+wood,"The species and insect access designation. control = Pinus radiata insect exclosure, oak = Q. rubra insect exclosure, and insect = P. radiata with insect access"
+hsba,The average basal area of Lonicera maackii shrubs within a square meter of the decay station in cm
+hstot,The abundance of L. maackii within a square meter of the decay station
+hspayn,"The presence/absence of L. maackii within a square meter of the decay station with response of ""yes"" or ""no"""
+hspa,"The presence/absence of L. maackii within a square meter of the decay station with response of ""1"" or ""0"""
+cancov,"The average percent canopy cover at each station, averaged throughout one year"
+moisture,The percent water content of each block
+decrate,"The decay rate of each block, calculated using a mass loss ratio over time"
+bg,Beta glucosidase activity for each wood block calculated in micromol / hour gram
+lap,Leucine aminopeptidase activity for each wood block calculated in micromol / hour gram
+per,Peroxidase activity for each wood block calculated in micromol / hour gram
+po,Phenol oxidase activity for each wood block calculated in micromol / hour gram
+ap,Phosphatase activity for each wood block calculated in micromol / hour gram
+insect,Insect presence or absence within the decomposition bag at the time of sample collection for blocks that had insect access.

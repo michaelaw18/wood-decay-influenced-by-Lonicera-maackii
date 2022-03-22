@@ -1,0 +1,622 @@
+---
+title: "lmwd_final"
+output:
+  word_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The influence of Lonicera maackii on decomposition of coarse woody debris 
+This is the data analysis of decomposition dynamics of Quercus rubra and Pinus radiata wood in a temperate forest invaded by Lonicera maackii. We used 240 total blocks that were placed in mesh bags, 80 Q. rubra, and 160 P. radiata. Eighty P. radiata blocks had holes punched out of their mesh to allow insect access, so there were 80 P. radiata with insect access and 80 without. We placed 6 wood blocks (2 Q. rubra, 2 P. radiata with insects and 2 P. radiata without insects) at stations 5m apart along two separate transects and allowed them to decay for one or two years. We measured the light availability to the wood blocks and the presence/absence, size, and abundance of Lonicera maackii in the surrounding 1 meter of the blocks. We collected one half of the blocks after one year of decay (40 Q. rubra, 40 P. radiata with insect access and 40 P. radiata with insect exclosures) and measured the moisture of the wood, dried the wood and calculated decay rates, and used subsamples of wood to conduct enzyme assays. We measured the activity of beta glucosidase, leucine aminopeptidase, peroxidase, phenol oxidase and phosphatase. After two years, we collected the second half of the blocks and we measured their mass to calculate decay rates and we measured moisture content. We also noted the presence of insects within the decomposition bags at the time of collection for bags which allowed insect access.
+
+## Variable definitions
+
+* ID - unique number for each block
+* station - the location at which blocks were placed for decay
+* year - the length of decay, one or two years
+* wood - control: P. radiata without insect access, oak: Q. rubra, insect: P. radiata with insect access
+* hsba - the average basal area of honeysuckle within 1 square meter of the plot
+* hstot - the total number of honeysuckle within 1 square meter of the plot
+* hspayn - presence/absence of honeysuckle with response of "yes" or "no"
+* hspa - presence/absence of honeysuckle with response of "0" or "1"
+* cancov - the average annual percent canopy cover at the decay station
+* moisture - the percent water content of each wood block
+* decrate - the decomposition rate of each wood block using mass loss ratio over time
+* bg - beta glucosidase activity of wood block in micro-mol per hour gram
+* lap - leucine aminopeptidase activity of wood block in micro-mol per hour gram
+* per - peroxidase activity of wood block in micro-mol per hour gram
+* po - phenol oxidase activity of wood block in micro-mol per hour gram
+* ap - phosphatase activity of wood block in micro-mol per hour gram
+* insect - the presence/absence of insects in decay bags where insects had access
+
+# Data and packages
+
+Reading in all packages used throughout the analysis
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(patchwork)
+library(MASS)
+library(nlme)
+library(lme4)
+library(performance)
+library(BBmisc)
+library(plsdepot)
+library(metafolio)
+library(stats)
+library(factoextra)
+library(vegan)
+```
+
+Loading in the datasheet 
+```{r, warning=FALSE, message=FALSE}
+lwdf_all <- read.csv("C:/Users/mjean/Desktop/loniceramaackii_wooddecay_finaldata.csv")
+#available at LINK
+head(lwdf_all)
+
+```
+
+One decay station has L. maackii that are 10x larger than the average of each other, so we will remove it
+```{r, warning=FALSE, message=FALSE}
+#subset to only one representative of bait stations (one per year and wood type), to avoid pseudoreplication
+lwdf.1station <- lwdf_all %>% 
+  filter(wood=="oak") %>% 
+  filter(year=="one")
+
+hist(lwdf.1station$hsba)
+# one station has extremely large honeysuckle
+
+
+#Making a new dataframe that excludes the bait station with exceptionally large honeysuckle
+lwdf <- filter(lwdf_all, station != "40")
+head(lwdf)
+```
+
+# Lonicera maackii and wood decay
+Question: Does honeysuckle size, abundance or presence alter decay rate? We use year and wood as interaction terms because it is likely that decay rates depend on the length of decomposition (year) and the type of wood that is decaying (wood). Station is used as a random factor because L. maackii characteristics were only measured one time, at the establishment of decay stations. We used negative binomial glmer because decay rate was zero inflated and overdispersed.
+
+```{r, warning=FALSE, message=FALSE}
+summary(glmer.nb(decrate~year*wood*hsba+(1|station), data=lwdf))
+
+summary(glmer.nb(decrate~year*wood*hstot+(1|station), data=lwdf))
+
+summary(glm(hspa~year*wood*decrate+(1|station), data=lwdf, family="binomial"))
+```
+
+# Lonicera maackii on wood moisture or canopy cover
+Question: How does honeysuckle change wood moisture or canopy cover? 
+
+```{r, warning=FALSE, message=FALSE}
+#moisture is block level measurement, so it can be accounted for over all block types
+summary(lm(moisture~hsba*year*wood, data=lwdf))
+summary(lm(moisture~hstot*year*wood,  data=lwdf))
+summary(glm(hspa~moisture*wood*year, data=lwdf, family="binomial"))
+
+#Filtering data set to have one representative from year and wood type, so that bait level measurements (honeysuckle and canopy cover) are not pseudoreplicated
+lwdf.b <- lwdf %>% 
+  filter(wood=="oak") %>% 
+  filter(year=="one")
+
+summary((lm(cancov~hsba,  data = lwdf.b)))
+summary(lm(cancov~hstot, data=lwdf.b))
+summary(glm(hspa~cancov, data=lwdf.b, family = "binomial"))
+```
+
+# Canopy cover's influence on moisture, and decay rates
+Question: how does canopy cover decomposition rate? How does moisture change with canopy cover? 
+
+```{r, warning=FALSE, message=FALSE}
+summary(glmer.nb(decrate~cancov*wood*year+(1|station), data=lwdf))
+summary(lme(moisture~cancov*year*wood, random=~1|station, data=lwdf))
+```
+
+# Lonicera and enzymes
+
+Subset data to year one without insects to compare just pine vs oak 
+Enzyme data only collected in year 1, so remove year 2
+
+
+```{r, warning=FALSE, message=FALSE}
+lwdfo<- filter(lwdf, wood !="insect")
+lwdf1o <- lwdf %>% 
+  filter(year == "one") %>% 
+  filter(wood != "insect")
+```
+
+
+For each enzyme we will look at the influence of L. maackii abundance, size, and presence on the enzyme activity and use wood species as an interaction to see if there were differences by Pine or Oak wood.
+
+Beta Glucosidase
+```{r, warning=FALSE, message=FALSE}
+summary(lm(bg~hsba*wood, data = lwdf1o))
+summary(lm(bg~hstot*wood, data=lwdf1o))
+summary(glm(hspa~log(bg)*wood, data=lwdf1o, family = "binomial"))
+```
+
+Phosphatase
+```{r, warning=FALSE, message=FALSE}
+summary(lm(ap~hsba*wood, data = lwdf1o))
+summary(lm(ap~hstot*wood, data=lwdf1o))
+summary(glm(hspa~log(ap)*wood, data=lwdf1o, family = "binomial"))
+```
+
+Leucine aminopeptidase
+```{r, warning=FALSE, message=FALSE}
+summary(lm(lap~hsba*wood, data = lwdf1o))
+summary(lm(lap~hstot*wood, data=lwdf1o))
+summary(glm(hspa~lap*wood, data=lwdf1o, family = "binomial"))
+```
+
+Phenol oxidase
+```{r, warning=FALSE, message=FALSE}
+summary(lm(po~hsba*wood, data=lwdf1o))
+summary(lm(po~hstot*wood, data=lwdf1o))
+summary(glm(hspa~po*wood, data=lwdf1o, family = "binomial"))
+```
+ 
+Peroxidase
+```{r, warning=FALSE, message=FALSE}
+summary(lm(per~hsba*wood, data = lwdf1o))
+summary(lm(per~hstot*wood, data=lwdf1o))
+summary(glm(hspa~per*wood, data=lwdf1o, family = "binomial"))
+```
+
+# Decay rates by collection time for pine and oak
+Question: Was decay faster after 2 years of decay than 1 year of decay? We used wood as a random factor to see if this was a generalizable result outside of species
+
+```{r, warning=FALSE, message=FALSE}
+dec.yr <- glmer.nb(decrate~year+(1|wood),data=lwdfo)
+summary(dec.yr)
+r2(dec.yr)
+#yes decay was faster in year two overall 
+#this makes sense because decay is exponential
+```
+
+
+# Impact of moisture on decay for pine and oak
+Question: Was moisture different based on wood species? Did the interaction of wood moisture and wood species alter decay rates?
+```{r, warning=FALSE, message=FALSE}
+summary(lm(moisture~wood, data=lwdfo))
+summary(glm.nb(decrate~moisture*wood,data=lwdfo))
+```
+
+# Enzyme activies by pine vs oak
+Question: Did enzyme activities change by wood species?
+
+```{r, warning=FALSE, message=FALSE}
+bg_wood <- lm(bg~wood, data=lwdf1o)
+summary(bg_wood)
+
+ap_wood <- lm(ap~wood, data=lwdf1o)
+summary(ap_wood)
+
+lap_wood <- lm(lap~wood, data=lwdf1o)
+summary(lap_wood)
+
+po_wood <- lm(po~wood, data=lwdf1o)
+summary(po_wood)
+
+per_wood <- lm(per~wood, data=lwdf1o)
+summary(per_wood)
+```
+
+
+# enzymes by moisture and pine vs oak
+Question: Did enzyme activity change with the moisture of the wood, and was this species dependent?
+
+```{r, warning=FALSE, message=FALSE}
+bg_moisture <- lm(bg~moisture*wood, lwdf1o)
+summary(bg_moisture)
+
+lap_moisture <- lm(log(lap)~moisture*wood, lwdf1o)
+summary(lap_moisture)
+
+ap_moisture <- lm(ap~moisture*wood, lwdf1o)
+summary(ap_moisture)
+
+po_moisture <- lm(po~log(moisture)*wood, lwdf1o)
+summary(po_moisture)
+
+per_moisture <- lm(per~log(moisture)*wood, lwdf1o)
+summary(per_moisture)
+```
+
+#enzymes by canopy cover and pine vs oak
+Question: Did canopy cover (light availablility) change enzyme activities? Station is used as a random factor since canopy cover was measured one time for each station
+
+
+```{r, warning=FALSE, message=FALSE}
+bg_cancov <- lme(log(bg)~cancov, random = ~1|station, data = lwdf1o)
+summary(bg_cancov)
+
+lap_cancov <- lme(log(lap)~(cancov), random = ~1|station, data = lwdf1o, na.action=na.omit)
+summary(lap_cancov)
+
+ap_cancov <- lme(log(ap)~(cancov), random = ~1|station, data = lwdf1o)
+summary(ap_cancov)
+
+po_cancov <- lme((po)~(cancov), random = ~1|station, data = lwdf1o, na.action=na.omit)
+summary(po_cancov)
+
+per_cancov <- lme((per)~log(cancov), random = ~1|station, data = lwdf1o, na.action=na.omit)
+summary(per_cancov)
+```
+
+
+# Enzyme PCA pine vs oak data
+Condensing enzyme activity data into two linear principal components to determine how they respond to wood species and 
+L. maackii presence/absence
+
+Normalize data
+```{r, warning=FALSE, message=FALSE}
+pap <- normalize(lwdf1o$ap, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+pbg <- normalize(lwdf1o$bg, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+plap <- normalize(lwdf1o$lap, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+ppo <- normalize(lwdf1o$po, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+pper <- normalize(lwdf1o$per, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+```
+
+Creating dataframe to use in the PCA and testing correlation between variables
+```{r, warning=FALSE, message=FALSE}
+lwdfo.envi<-with(lwdf1o, data.frame(hspayn, wood, pap, pbg, plap, ppo, pper))
+
+lwdfo.envi1<-na.omit(lwdfo.envi)
+
+#envi
+envi.coro<-nipals(lwdfo.envi1[,3:7])
+plot(envi.coro,main="Circle of Correlation", cex.main=1)
+cor(lwdfo.envi1[,3:7])
+```
+
+Creating PCA and visualizing the variation accounted for 
+```{r, warning=FALSE, message=FALSE}
+lwdfo.pca<-prcomp(~pap+pbg+plap+ppo+pper, lwdfo.envi1[,3:7], na.action=na.omit, center=TRUE,scale.=TRUE)
+
+fviz_eig(lwdfo.pca)
+
+```
+
+## PCA plot by pine vs oak species
+```{r, warning=FALSE, message=FALSE}
+fviz_pca_biplot(lwdfo.pca, #pca made with prcomp
+                col.ind=lwdfo.envi1$wood, #grouping value
+                geom=c("point"), #makes points unlabelled
+                addEllipses = TRUE, #creates 95% confidence intervals
+                repel= TRUE) #reduces overlap
+```
+
+Anosim results of enzymes by pine and oak species
+```{r, warning=FALSE, message=FALSE}
+envio<-(lwdfo.envi[,3:7])
+envio1<-na.omit(envio)
+anosim(envio1, lwdfo.envi1$wood, permutations = 999, distance = "euclidean", strata=NULL, parallel=1)
+```
+
+## Oak vs pine enzyme PCA by honeysuckle presence
+```{r, warning=FALSE, message=FALSE}
+fviz_pca_biplot(lwdfo.pca, #pca made with prcomp
+                col.ind=lwdfo.envi1$hspayn, #grouping value
+                geom=c("point"), #makes points unlabelled
+                addEllipses = TRUE, #creates 95% confidence intervals
+                repel= TRUE) #reduces overlap
+```
+
+```{r, warning=FALSE, message=FALSE}
+anosim(envio1, lwdfo.envi1$hspayn, permutations = 999, distance = "euclidean", strata=NULL, parallel=1)
+```
+
+# Comparing pine samples with or without insect access
+The analyses are conducted as they were above but comparing insect vs no insect instead of pine vs oak.
+
+Filtering the dataset to include P. radiata with insect access and P. radiata insect exclosures
+```{r, warning=FALSE, message=FALSE}
+lwdfi <- filter(lwdf, wood != "oak")
+```
+
+# Lonicera impact on insect presence
+Does size, abundnace or presence of Lonicera change liklihood of insect presence?
+
+```{r, warning=FALSE, message=FALSE}
+summary(glm(insect~hsba,data=lwdfi,family="binomial",na.action=na.omit))
+summary(glm(insect~hstot,data=lwdfi,family="binomial",na.action=na.omit))
+summary(glm(insect~hspa,data=lwdfi,family="binomial",na.action=na.omit))
+```
+
+# Decay rate by insects alone
+How does decay rate change when insects had access to the wood blocks?
+
+```{r, warning=FALSE, message=FALSE}
+summary(glm.nb(decrate~wood,data=lwdfi))
+```
+
+# Decay rate by honeysuckle and insect presence
+Did decay rate change based on an interaction of insect access with honeysuckle size, abundance or presence? Bait station used as a random effect because honeysuckle was measured once per station
+
+```{r, warning=FALSE, message=FALSE}
+dec.hsba.i<-(glmer.nb(decrate~hsba*wood+(1|station), data = lwdfi))
+summary(dec.hsba.i)
+
+dec.hstot.i<-glmer.nb(decrate~hstot*wood+(1|station), data=lwdfi)
+summary(dec.hstot.i)
+
+dec.hspa.i<-glmer(hspa~decrate*wood+(1|station), data=lwdfi, family = "binomial")
+summary(dec.hspa.i)
+```
+
+# Decay rates with insect access and canopy cover
+Does decay rate change based on moisture or canopy cover as an interaction with insect access? Canopy cover was measured once per bait station, so station is used as a random effect.
+
+```{r, warning=FALSE, message=FALSE}
+summary(glmer.nb(decrate~cancov*wood+(1|station), data=lwdfi))
+summary(glm.nb(decrate~moisture*wood,data=lwdfi))
+```
+
+# Enzymes by insect access
+
+Subset data to year one since enzymes were only measured after one year
+```{r, warning=FALSE, message=FALSE}
+lwdf1i <- filter(lwdfi, year == "one")
+```
+
+# Do enzymes change decomposition based on insect access
+Does decay rate changed based on an interaction of enzyme activity and insect access?
+
+```{r, warning=FALSE, message=FALSE}
+bg.decrate.i <- glm.nb(decrate~bg*wood, lwdf1i)
+summary(bg.decrate.i)
+
+lap.decrate.i <- glm.nb(decrate~log(lap)*wood, lwdf1i)
+summary(lap.decrate.i)
+
+ap.decrate.i <- glm.nb(decrate~ap*wood, lwdf1i)
+summary(ap.decrate.i)
+
+po.decrate.i <- glm.nb(decrate~po*wood, lwdf1i)
+summary(po.decrate.i)
+
+per.decrate.i <- glm.nb(decrate~per*wood, lwdf1i)
+summary(per.decrate.i)
+```
+
+# Does enzyme activity change where insects have access to blocks
+
+
+```{r, warning=FALSE, message=FALSE}
+bg_woodi <- lm(bg~wood, data=lwdf1i)
+summary(bg_woodi)
+
+ap_woodi <- lm(ap~wood, data=lwdf1i)
+summary(ap_woodi)
+
+lap_woodi <- lm(lap~wood, data=lwdf1i)
+summary(lap_woodi)
+
+po_woodi <- lm(po~wood, data=lwdf1i)
+summary(po_woodi)
+
+per_woodi <- lm(per~wood, data=lwdf1i)
+summary(per_woodi)
+```
+
+# Enzymes by canopy cover and insect access
+Canopy cover was measured once per bait station, so station is used as a random effect.
+
+```{r, warning=FALSE, message=FALSE}
+bg_cancovi <- lme(log(bg)~cancov*wood, random = ~1|station, data = lwdf1i)
+summary(bg_cancovi)
+
+lap_cancovi <- lme((lap)~log(cancov)*wood, random = ~1|station, data = lwdf1i, na.action=na.omit)
+summary(lap_cancovi)
+
+ap_cancovi <- lme(log(ap)~cancov*wood, random = ~1|station, data = lwdf1i)
+summary(ap_cancovi)
+
+po_cancovi <- lme(log(po)~cancov*wood, random = ~1|station, data = lwdf1i, na.action=na.omit)
+summary(po_cancovi)
+r2(po_cancovi)
+
+per_cancovi <- lme((per)~(cancov)*wood, random = ~1|station, data = lwdf1i, na.action=na.omit)
+summary(per_cancovi)
+```
+
+# Enzymes by moisture and insect access
+Is wood moisture different based on insect access?
+
+```{r, warning=FALSE, message=FALSE}
+summary(lm(moisture~wood, data=lwdfi))
+```
+
+
+# Enzyme PCA insect data
+
+
+Normalize data
+```{r, warning=FALSE, message=FALSE}
+pap1 <- normalize(lwdf1i$ap, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+pbg1 <- normalize(lwdf1i$bg, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+plap1 <- normalize(lwdf1i$lap, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+ppo1 <- normalize(lwdf1i$po, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+pper1 <- normalize(lwdf1i$per, method = "range", range = c(0, 1), margin = 1L, on.constant = "quiet")
+```
+
+Create dataframe for PCA and assess correlation
+```{r, warning=FALSE, message=FALSE}
+lwdfi.envi<-with(lwdf1i, data.frame(hspayn, wood, pap1, pbg1, plap1, ppo1, pper1))
+
+lwdfi.envi1<-na.omit(lwdfi.envi)
+
+#envi
+envi.cori1<-nipals(lwdfi.envi1[,3:7])
+plot(envi.cori1,main="Circle of Correlation", cex.main=1)
+cor(lwdfi.envi1[,3:7])
+```
+
+Create PCA and visualize variation accounted for by each dimension
+```{r, warning=FALSE, message=FALSE}
+lwdfi.pca<-prcomp(~pap1+pbg1+plap1+ppo1+pper1, lwdfi.envi1[,3:7], na.action=na.omit, center=TRUE,scale.=TRUE)
+
+fviz_eig(lwdfi.pca)
+
+```
+
+## Insect vs pine enzyme PCA by insect access / none
+```{r, warning=FALSE, message=FALSE}
+fviz_pca_biplot(lwdfi.pca, #pca made with prcomp
+                col.ind=lwdfi.envi1$wood, #grouping value
+                geom=c("point"), #makes points unlabelled
+                addEllipses = TRUE, #creates 95% confidence intervals
+                repel= TRUE) #reduces overlap
+```
+
+Analysis of similarty to determine of enzymes differ by insect access
+```{r, warning=FALSE, message=FALSE}
+envii<-(lwdfi.envi[,3:7])
+envii1<-na.omit(envii)
+anosim(envii1, lwdfi.envi1$wood, permutations = 999, distance = "euclidean", strata=NULL, parallel=1)
+```
+
+
+## Insect vs pine enzyme PCA by honeysuckle presence
+```{r, warning=FALSE, message=FALSE}
+fviz_pca_biplot(lwdfi.pca, #pca made with prcomp
+                col.ind=lwdfi.envi1$hspayn, #grouping value
+                geom=c("point"), #makes points unlabelled
+                addEllipses = TRUE, #creates 95% confidence intervals
+                repel= TRUE) #reduces overlap
+```
+
+```{r, warning=FALSE, message=FALSE}
+anosim(envii1, lwdfi.envi1$hspayn, permutations = 999, distance = "euclidean", strata=NULL, parallel=1)
+```
+
+# Figures!
+
+## Decay rate by year
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(lwdf,aes(year,decrate))+
+  geom_boxplot(alpha=0.7, outlier.color=NA) +
+  stat_boxplot(geom ='errorbar',width=0.5) +
+  geom_point(alpha=0.3, size=4, position=position_jitter(0.1))+
+  scale_fill_manual(values=c("white","white"))+
+  xlab("Year")+ ylab(expression(Decay~Rate~(year^{-1})))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+   theme(plot.title=element_text(family="serif", face="bold", size=20, vjust=-6,hjust=0.1),
+         axis.text.x = element_text(family="serif",color="black", size=14, angle=0),
+          axis.text.y = element_text(family="serif", color="black", size=14, angle=0),
+        axis.title.x = element_text(family="serif",color="black", size=18, angle=0),
+          axis.title.y = element_text(family="serif", color="black", size=18, angle=90),
+        legend.position = "none")
+```
+
+## Wood moisture by pine vs oak
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(lwdfo,aes(wood,moisture))+
+  geom_boxplot(alpha=0.7, outlier.color=NA) +
+  stat_boxplot(geom ='errorbar',width=0.5) +
+  geom_point(alpha=0.3, size=4, position=position_jitter(0.1))+
+  xlab("Wood Species")+ ylab("Moisture (%)")+
+  scale_x_discrete(labels=c("control" = "Pinus radiata", "oak" ="Quercus rubra"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+   theme(axis.text.x = element_text(face = "italic", family="serif", color="black", size=14, angle=0),
+          axis.text.y = element_text(family="serif", color="black", size=14, angle=0),
+        axis.title.x = element_text(family="serif",color="black", size=18, angle=0),
+          axis.title.y = element_text(family="serif", color="black", size=18, angle=90),
+        legend.position = "none")
+```
+
+# Three panel bg, lap and ap with wood moisture and wood species
+
+```{r, warning=FALSE, message=FALSE}
+bg.mois <-  ggplot(lwdf1o,aes(moisture,bg))+
+    geom_smooth(method="lm", aes(color=wood, fill=wood),show.legend = FALSE)+
+     scale_fill_manual(values=c("grey50","grey 20"))+
+ geom_point(aes(color=wood), alpha=0.7, size=4, position=position_jitter(0.1))+
+  scale_color_manual(labels=c("Pinus radiata","Quercus rubra"),values=c("grey60","black"))+
+  ggtitle("A")+xlab("Wood Moisture (%)")+ ylab(bquote(atop(beta-Glucosidase~Activity,(mu~mol~hr^{-1}~g^-1))))+
+   theme(legend.position= c(0.19,.9), legend.title=element_blank(), legend.text = element_text(family = "serif", face="italic", size=12), legend.background = element_rect(fill = "transparent", colour = NA),legend.key = element_rect(fill = "transparent"))+
+   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+   theme(plot.title=element_text(family="serif", face="bold", size=14, vjust=-6,hjust=-0.2),
+         axis.text.x = element_text(family="serif",color="black", size=12, angle=0),
+          axis.text.y = element_text(family="serif", color="black", size=14, angle=0),
+        axis.title.x = element_text(family="serif",color="black", size=12, angle=0),
+          axis.title.y = element_text(family="serif", color="black", size=14, angle=90))
+
+
+lap.mois <-  ggplot(lwdf1o,aes(moisture,lap))+
+     geom_smooth(method="lm", aes(color=wood,fill=wood),show.legend = FALSE)+
+     scale_fill_manual(values=c("grey50","grey 20"))+
+ geom_point(aes(color=wood), alpha=0.7, size=4, position=position_jitter(0.1))+
+  scale_color_manual(labels=c("Pine","Oak"),values=c("grey60","black"))+
+  ggtitle("B")+xlab("Wood Moisture (%)")+ ylab(bquote(atop(Leucine~Aminopeptidase~Activity,(mu~mol~hr^{-1}~g^-1))))+
+   theme(legend.position= c("none"))+
+   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+   theme(plot.title=element_text(family="serif", face="bold", size=14, vjust=-6,hjust=-0.17),
+         axis.text.x = element_text(family="serif",color="black", size=12, angle=0),
+          axis.text.y = element_text(family="serif", color="black", size=14, angle=0),
+        axis.title.x = element_text(family="serif",color="black", size=12, angle=0),
+          axis.title.y = element_text(family="serif", color="black", size=14, angle=90))
+  
+ap.mois <-  ggplot(lwdf1o,aes(moisture,ap))+
+  geom_smooth(method="lm", aes(color=wood,fill=wood),show.legend = FALSE)+
+     scale_fill_manual(values=c("grey50","grey 20"))+
+ geom_point(aes(color=wood), alpha=0.7, size=4, position=position_jitter(0.1))+
+  scale_color_manual(labels=c("Pine","Oak"),values=c("grey60","black"))+
+  ggtitle("C")+xlab("Wood Moisture (%)")+ ylab(bquote(atop(Phosphatase~Activity,(mu~mol~hr^{-1}~g^-1))))+
+   theme(legend.position= c("none"))+
+   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+   theme(plot.title=element_text(family="serif", face="bold", size=14, vjust=-6 ,hjust=-0.2),
+         axis.text.x = element_text(family="serif",color="black", size=12, angle=0),
+          axis.text.y = element_text(family="serif", color="black", size=14, angle=0),
+        axis.title.x = element_text(family="serif",color="black", size=12, angle=0),
+          axis.title.y = element_text(family="serif", color="black", size=14, angle=90))
+
+(bg.mois/lap.mois/ap.mois)
+```
+
+
+## enzyme activity by insect access
+
+```{r, warning=FALSE, message=FALSE}
+ap.insect <-  ggplot(lwdfi,aes(wood,ap))+
+  geom_boxplot(alpha=0.7, outlier.color=NA) +
+  stat_boxplot(geom ='errorbar',width=0.5) +
+  geom_point(alpha=0.3, size=4, position=position_jitter(0.1))+
+ ggtitle("A")+ xlab("Insect Access")+ ylab(bquote(atop(Phosphatase~Activity,(mu~mol~hr^{-1}~g^-1))))+
+  scale_x_discrete(labels=c("control" = "Exclosure", "insect" ="Access"))+
+  theme(plot.title=element_text(family="serif", face="bold", size=14, vjust=-6 ,hjust=-0.2))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+   theme(axis.text.x = element_text(family="serif", color="black", size=14, angle=0),
+          axis.text.y = element_text(family="serif", color="black", size=14, angle=0),
+        axis.title.x = element_text(family="serif",color="black", size=18, angle=0),
+          axis.title.y = element_text(family="serif", color="black", size=18, angle=90),
+        legend.position = "none")
+po.insect <-ggplot(lwdfi,aes(wood,po))+
+  geom_boxplot(alpha=0.7, outlier.color=NA) +
+  stat_boxplot(geom ='errorbar',width=0.5) +
+  geom_point(alpha=0.3, size=4, position=position_jitter(0.1))+
+  ggtitle("B")+xlab("Insect Access")+ ylab(bquote(atop(Phenol~Oxidase~Activity,(mu~mol~hr^{-1}~g^-1))))+
+  scale_x_discrete(labels=c("control" = "Exclosure", "insect" ="Access"))+
+    theme(plot.title=element_text(family="serif", face="bold", size=14, vjust=-6 ,hjust=-0.3))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+   theme(axis.text.x = element_text(family="serif", color="black", size=14, angle=0),
+          axis.text.y = element_text(family="serif", color="black", size=14, angle=0),
+        axis.title.x = element_text(family="serif",color="black", size=18, angle=0),
+          axis.title.y = element_text(family="serif", color="black", size=18, angle=90),
+        legend.position = "none")
+ap.insect+po.insect
+```
+
